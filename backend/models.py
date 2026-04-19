@@ -17,6 +17,12 @@ from sqlalchemy.sql import func
 from database import Base
 
 
+class Role(enum.Enum):
+    STUDENT = "student"
+    TEACHER = "teacher"
+    ADMIN = "admin"
+
+
 class ClassLevel(enum.Enum):
     EIGHT = "8th Grade"
     NINE = "9th Grade"
@@ -93,6 +99,7 @@ class Students(Base):
     mobile_number = Column(String, nullable=False)
     password_hash = Column(String, nullable=False)
     class_section = Column(Enum(ClassLevel), nullable=False)
+    role = Column(Enum(Role), nullable=False, default=Role.STUDENT)
     created_at = Column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -114,6 +121,7 @@ class Teachers(Base):
     email_id = Column(String, unique=True, nullable=False, index=True)
     mobile_number = Column(String, nullable=False)
     password_hash = Column(String, nullable=False)
+    role = Column(Enum(Role), nullable=False, default=Role.TEACHER)
     created_at = Column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -131,6 +139,7 @@ class Admins(Base):
     mobile_number = Column(String, nullable=False)
     password_hash = Column(String, nullable=False)
     super_admin = Column(Boolean, nullable=False, default=False)
+    role = Column(Enum(Role), nullable=False, default=Role.ADMIN)
     created_at = Column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
