@@ -8,7 +8,8 @@ import bcrypt
 import jwt
 import uuid
 from datetime import datetime, timedelta, timezone
-from pydantic import BaseModel, EmailStr, Field
+from typing import Annotated
+from pydantic import BaseModel, BeforeValidator, EmailStr, Field
 import models
 import os
 from dotenv import load_dotenv
@@ -305,18 +306,32 @@ def require_teacher(user=Depends(get_current_user)):
     return user
 
 
+def _class_level_from_name(v):
+    if isinstance(v, models.ClassLevel):
+        return v
+    if isinstance(v, str) and v in models.ClassLevel.__members__:
+        return models.ClassLevel[v]
+    raise ValueError(
+        f"invalid class level '{v}' — expected one of "
+        f"{list(models.ClassLevel.__members__)}"
+    )
+
+
+ClassLevelName = Annotated[models.ClassLevel, BeforeValidator(_class_level_from_name)]
+
+
 class StudentCreate(BaseModel):
     name: str
     school_id: str
     email: EmailStr
     mobile_number: str
     password: str = Field(min_length=1, max_length=72)
-    class_section: models.ClassLevel
+    class_section: ClassLevelName
 
 
 class TeacherSubjectAssignment(BaseModel):
     subject: str
-    class_level: models.ClassLevel
+    class_level: ClassLevelName
 
 
 class TeacherCreate(BaseModel):
