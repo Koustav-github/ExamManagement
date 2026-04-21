@@ -100,6 +100,8 @@ class Students(Base):
     password_hash = Column(String, nullable=False)
     class_section = Column(Enum(ClassLevel), nullable=False)
     role = Column(Enum(Role), nullable=False, default=Role.STUDENT)
+    refresh_jti = Column(String, unique=True, nullable=True, index=True)
+    refresh_expires_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -122,6 +124,8 @@ class Teachers(Base):
     mobile_number = Column(String, nullable=False)
     password_hash = Column(String, nullable=False)
     role = Column(Enum(Role), nullable=False, default=Role.TEACHER)
+    refresh_jti = Column(String, unique=True, nullable=True, index=True)
+    refresh_expires_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -140,6 +144,8 @@ class Admins(Base):
     password_hash = Column(String, nullable=False)
     super_admin = Column(Boolean, nullable=False, default=False)
     role = Column(Enum(Role), nullable=False, default=Role.ADMIN)
+    refresh_jti = Column(String, unique=True, nullable=True, index=True)
+    refresh_expires_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
