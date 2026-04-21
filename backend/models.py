@@ -130,6 +130,9 @@ class Teachers(Base):
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
 
+    subjects = relationship(
+        "TeacherSubject", back_populates="teacher", cascade="all, delete-orphan"
+    )
     marks_entered = relationship("Marks", back_populates="entered_by")
 
 
@@ -165,8 +168,67 @@ class StudentSubject(Base):
         index=True,
     )
     subject = Column(String, nullable=False)
+    marks = Column(Float, nullable=False, server_default="0")
 
     student = relationship("Students", back_populates="subjects")
+
+
+class TeacherSubject(Base):
+    __tablename__ = "teacher_subjects"
+    __table_args__ = (
+        UniqueConstraint(
+            "teacher_id",
+            "subject",
+            "class_level",
+            name="uq_teacher_subject_class",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    teacher_id = Column(
+        Integer,
+        ForeignKey("teachers.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    subject = Column(String, nullable=False)
+    class_level = Column(Enum(ClassLevel), nullable=False)
+
+    teacher = relationship("Teachers", back_populates="subjects")
+    students = relationship(
+        "TeacherSubjectStudent",
+        back_populates="teacher_subject",
+        cascade="all, delete-orphan",
+    )
+
+
+class TeacherSubjectStudent(Base):
+    __tablename__ = "teacher_subject_students"
+    __table_args__ = (
+        UniqueConstraint(
+            "teacher_subject_id",
+            "student_id",
+            name="uq_teacher_subject_student",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    teacher_subject_id = Column(
+        Integer,
+        ForeignKey("teacher_subjects.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    student_id = Column(
+        Integer,
+        ForeignKey("students.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    marks = Column(Float, nullable=False, server_default="0")
+
+    teacher_subject = relationship("TeacherSubject", back_populates="students")
+    student = relationship("Students")
 
 
 class Marks(Base):

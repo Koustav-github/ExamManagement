@@ -141,6 +141,69 @@ def sync_user(
         expires_in=access_time * 60,
     )
 
+@app.post("/auth/refresh", response_model=LoginResponse)
+def refresh(
+    response: Response,
+    refresh_token: str | None = Cookie(default=None),
+    db: Session = Depends(get_database),
+):
+    if not refresh_token:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "no refresh token")
+
+    try:
+        payload = jwt.decode(refresh_token, secret_key, algorithms=[algorithm])
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "refresh token expired")
+    except jwt.InvalidTokenError:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "invalid refresh token")
+
+    if payload.get("type") != "refresh":
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "not a refresh token")
+
+    try:
+        sub = int(payload["sub"])
+        role = models.Role(payload["role"])
+        jti = payload["jti"]
+    except (KeyError, ValueError):
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "malformed refresh token")
+
+    if role is models.Role.STUDENT:
+        user = db.get(models.Students, sub)
+    elif role is models.Role.TEACHER:
+        user = db.get(models.Teachers, sub)
+    elif role is models.Role.ADMIN:
+        user = db.get(models.Admins, sub)
+    else:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "invalid role")
+
+    if user is None or user.refresh_jti != jti:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "refresh token revoked")
+
+    new_access = create_access_token(sub=user.id, role=user.role.value)
+    new_refresh, new_jti, new_exp = create_refresh_token(
+        sub=user.id, role=user.role.value
+    )
+
+    user.refresh_jti = new_jti
+    user.refresh_expires_at = new_exp
+    db.commit()
+
+    response.set_cookie(
+        key="refresh_token",
+        value=new_refresh,
+        max_age=refresh_time * 24 * 60 * 60,
+        httponly=True,
+        secure=SECURE_COOKIES,
+        samesite="lax",
+        path="/auth",
+    )
+
+    return LoginResponse(
+        access_token=new_access,
+        expires_in=access_time * 60,
+    )
+
+
 @app.post("/auth/logout", status_code=status.HTTP_204_NO_CONTENT)
 def logout(
     response: Response,
@@ -236,6 +299,12 @@ def require_super_admin(admin=Depends(require_admin)):
     return admin
 
 
+def require_teacher(user=Depends(get_current_user)):
+    if user.role is not models.Role.TEACHER:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "teacher only")
+    return user
+
+
 class StudentCreate(BaseModel):
     name: str
     school_id: str
@@ -245,12 +314,18 @@ class StudentCreate(BaseModel):
     class_section: models.ClassLevel
 
 
+class TeacherSubjectAssignment(BaseModel):
+    subject: str
+    class_level: models.ClassLevel
+
+
 class TeacherCreate(BaseModel):
     name: str
     teacher_id: str
     email: EmailStr
     mobile_number: str
     password: str = Field(min_length=1, max_length=72)
+    subjects: list[TeacherSubjectAssignment] = Field(min_length=1)
 
 
 class AdminCreate(BaseModel):
@@ -260,6 +335,13 @@ class AdminCreate(BaseModel):
     mobile_number: str
     password: str = Field(min_length=1, max_length=72)
     super_admin: bool = False
+
+
+class MarksUpload(BaseModel):
+    student_id: int
+    subject: str
+    max_marks: float = Field(gt=0)
+    marks_obtained: float = Field(ge=0)
 
 
 @app.post("/admin/students", status_code=status.HTTP_201_CREATED)
@@ -276,20 +358,45 @@ def create_student(
         password_hash=hash_password(payload.password),
         class_section=payload.class_section,
     )
+    subject_enum = models.SUBJECTS_BY_CLASS[payload.class_section]
+    subject_names = list(subject_enum.__members__.keys())
+    student.subjects = [
+        models.StudentSubject(subject=name) for name in subject_names
+    ]
     db.add(student)
     try:
-        db.commit()
+        db.flush()
     except IntegrityError:
         db.rollback()
         raise HTTPException(
             status.HTTP_409_CONFLICT, "school_id or email already exists"
         )
+
+    matching_ts = (
+        db.query(models.TeacherSubject)
+        .filter(
+            models.TeacherSubject.class_level == payload.class_section,
+            models.TeacherSubject.subject.in_(subject_names),
+        )
+        .all()
+    )
+    for ts in matching_ts:
+        db.add(
+            models.TeacherSubjectStudent(
+                teacher_subject_id=ts.id, student_id=student.id
+            )
+        )
+
+    db.commit()
     db.refresh(student)
     return {
         "id": student.id,
         "school_id": student.school_id,
         "email": student.email_id,
         "role": student.role.value,
+        "subjects": [
+            {"subject": s.subject, "marks": s.marks} for s in student.subjects
+        ],
     }
 
 
@@ -299,6 +406,13 @@ def create_teacher(
     _admin=Depends(require_admin),
     db: Session = Depends(get_database),
 ):
+    for item in payload.subjects:
+        if not models.valid_subject_for_class(item.class_level, item.subject):
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                f"invalid subject '{item.subject}' for class '{item.class_level.name}'",
+            )
+
     teacher = models.Teachers(
         name=payload.name,
         teacher_id=payload.teacher_id,
@@ -306,20 +420,52 @@ def create_teacher(
         mobile_number=payload.mobile_number,
         password_hash=hash_password(payload.password),
     )
+    teacher.subjects = [
+        models.TeacherSubject(subject=item.subject, class_level=item.class_level)
+        for item in payload.subjects
+    ]
     db.add(teacher)
     try:
-        db.commit()
+        db.flush()
     except IntegrityError:
         db.rollback()
         raise HTTPException(
-            status.HTTP_409_CONFLICT, "teacher_id or email already exists"
+            status.HTTP_409_CONFLICT,
+            "teacher_id/email already exists or duplicate subject assignment",
         )
+
+    for ts in teacher.subjects:
+        matching_students = (
+            db.query(models.Students)
+            .join(models.StudentSubject)
+            .filter(
+                models.Students.class_section == ts.class_level,
+                models.StudentSubject.subject == ts.subject,
+            )
+            .all()
+        )
+        for s in matching_students:
+            db.add(
+                models.TeacherSubjectStudent(
+                    teacher_subject_id=ts.id, student_id=s.id
+                )
+            )
+
+    db.commit()
     db.refresh(teacher)
     return {
         "id": teacher.id,
         "teacher_id": teacher.teacher_id,
         "email": teacher.email_id,
         "role": teacher.role.value,
+        "subjects": [
+            {
+                "subject": s.subject,
+                "class_level": s.class_level.name,
+                "students_enrolled": len(s.students),
+            }
+            for s in teacher.subjects
+        ],
     }
 
 
@@ -352,6 +498,98 @@ def create_admin(
         "email": new_admin.email_id,
         "role": new_admin.role.value,
         "super_admin": new_admin.super_admin,
+    }
+
+
+@app.post("/teacher/marks")
+def upload_marks(
+    payload: MarksUpload,
+    teacher=Depends(require_teacher),
+    db: Session = Depends(get_database),
+):
+    if payload.marks_obtained > payload.max_marks:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "marks_obtained cannot exceed max_marks",
+        )
+
+    student = db.get(models.Students, payload.student_id)
+    if student is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "student not found")
+
+    ts = (
+        db.query(models.TeacherSubject)
+        .filter(
+            models.TeacherSubject.teacher_id == teacher.id,
+            models.TeacherSubject.subject == payload.subject,
+            models.TeacherSubject.class_level == student.class_section,
+        )
+        .first()
+    )
+    if ts is None:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "teacher not authorized for this subject/class",
+        )
+
+    tss = (
+        db.query(models.TeacherSubjectStudent)
+        .filter(
+            models.TeacherSubjectStudent.teacher_subject_id == ts.id,
+            models.TeacherSubjectStudent.student_id == payload.student_id,
+        )
+        .first()
+    )
+    if tss is None:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "student not enrolled under this teacher's subject",
+        )
+
+    mark = (
+        db.query(models.Marks)
+        .filter(
+            models.Marks.student_id == payload.student_id,
+            models.Marks.subject == payload.subject,
+        )
+        .first()
+    )
+    if mark is None:
+        mark = models.Marks(
+            student_id=payload.student_id,
+            subject=payload.subject,
+            max_marks=payload.max_marks,
+            marks_obtained=payload.marks_obtained,
+            entered_by_teacher_id=teacher.id,
+        )
+        db.add(mark)
+    else:
+        mark.max_marks = payload.max_marks
+        mark.marks_obtained = payload.marks_obtained
+        mark.entered_by_teacher_id = teacher.id
+
+    tss.marks = payload.marks_obtained
+
+    ss = (
+        db.query(models.StudentSubject)
+        .filter(
+            models.StudentSubject.student_id == payload.student_id,
+            models.StudentSubject.subject == payload.subject,
+        )
+        .first()
+    )
+    if ss is not None:
+        ss.marks = payload.marks_obtained
+
+    db.commit()
+    db.refresh(mark)
+    return {
+        "id": mark.id,
+        "student_id": mark.student_id,
+        "subject": mark.subject,
+        "max_marks": mark.max_marks,
+        "marks_obtained": mark.marks_obtained,
+        "entered_by_teacher_id": mark.entered_by_teacher_id,
     }
 
 
