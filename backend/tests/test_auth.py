@@ -75,6 +75,52 @@ def test_refresh_without_cookie_returns_401(client):
     assert resp.status_code == 401
 
 
+def test_signin_409_when_already_signed_in(client, super_admin, db):
+    first = client.post(
+        "/user/signin",
+        json={
+            "email": "super@test.com",
+            "password": "super-pass",
+            "role": "admin",
+        },
+    )
+    assert first.status_code == 200
+
+    second = client.post(
+        "/user/signin",
+        json={
+            "email": "super@test.com",
+            "password": "super-pass",
+            "role": "admin",
+        },
+    )
+    assert second.status_code == 409
+    assert "logout" in second.json()["detail"].lower()
+
+
+def test_signin_allowed_after_logout(client, super_admin):
+    client.post(
+        "/user/signin",
+        json={
+            "email": "super@test.com",
+            "password": "super-pass",
+            "role": "admin",
+        },
+    )
+    logout = client.post("/auth/logout")
+    assert logout.status_code == 204
+
+    resp = client.post(
+        "/user/signin",
+        json={
+            "email": "super@test.com",
+            "password": "super-pass",
+            "role": "admin",
+        },
+    )
+    assert resp.status_code == 200
+
+
 def test_logout_revokes_refresh_and_blocks_subsequent_refresh(
     client, super_admin, db
 ):

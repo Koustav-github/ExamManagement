@@ -3,6 +3,7 @@ import models
 
 
 def _signin(client, email, password, role):
+    client.post("/auth/logout")
     resp = client.post(
         "/user/signin",
         json={"email": email, "password": password, "role": role},

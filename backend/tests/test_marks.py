@@ -3,6 +3,8 @@ import models
 
 
 def _signin(client, email, password, role):
+    # Clear any previous session — /user/signin 409s on an active cookie.
+    client.post("/auth/logout")
     resp = client.post(
         "/user/signin",
         json={"email": email, "password": password, "role": role},

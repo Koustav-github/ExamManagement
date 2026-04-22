@@ -169,15 +169,50 @@ def create_refresh_token(sub: int, role: str) -> tuple[str, str, datetime]:
         "Verifies credentials against the role's table and returns an access "
         "token in the body plus a refresh cookie (`refresh_token`, httpOnly, "
         "path=`/auth`). Store the access token in memory on the client; the "
-        "refresh cookie is handled by the browser."
+        "refresh cookie is handled by the browser.\n\n"
+        "**One active session at a time.** If a valid refresh cookie is "
+        "already present (any role), the request is rejected with 409. Call "
+        "`POST /auth/logout` first, then sign in again — switching roles in "
+        "the same browser requires an explicit logout."
     ),
-    responses={401: {"description": "Invalid email or password"}},
+    responses={
+        401: {"description": "Invalid email or password"},
+        409: {"description": "Already signed in — call /auth/logout first"},
+    },
 )
 def sync_user(
     user_data: UserSync,
     response: Response,
+    refresh_token: str | None = Cookie(default=None),
     db: Session = Depends(get_database),
 ):
+    if refresh_token:
+        try:
+            existing = jwt.decode(
+                refresh_token, secret_key, algorithms=[algorithm]
+            )
+            if existing.get("type") == "refresh":
+                prev_sub = int(existing["sub"])
+                prev_role = models.Role(existing["role"])
+                prev_jti = existing["jti"]
+                if prev_role is models.Role.STUDENT:
+                    prev = db.get(models.Students, prev_sub)
+                elif prev_role is models.Role.TEACHER:
+                    prev = db.get(models.Teachers, prev_sub)
+                elif prev_role is models.Role.ADMIN:
+                    prev = db.get(models.Admins, prev_sub)
+                else:
+                    prev = None
+                if prev is not None and prev.refresh_jti == prev_jti:
+                    raise HTTPException(
+                        status.HTTP_409_CONFLICT,
+                        "already signed in — call /auth/logout first",
+                    )
+        except HTTPException:
+            raise
+        except (jwt.InvalidTokenError, KeyError, ValueError):
+            pass
+
     user = None
     if user_data.role is models.Role.STUDENT:
         user = (
