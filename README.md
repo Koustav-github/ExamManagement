@@ -155,3 +155,12 @@ want the event-management lens can read:
 - `class_section` → event / track
 - `Marks` → scores / evaluations
 - `/student/report-card` → participation certificate
+
+## Acknowledgement
+
+Built with **Claude** (Anthropic) as a pair-programming collaborator —
+used for bouncing design decisions, scaffolding boilerplate, reviewing
+edge cases, and drafting the test suite. Every line was reviewed,
+edited, and accepted by me; the architectural calls (auth model, marks
+denormalization, enum-name API, CORS posture, admin-gated provisioning)
+are mine.
