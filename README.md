@@ -61,7 +61,7 @@ All go in `backend/.env`. See `.env.example` for the canonical list.
 ## Running tests
 
 ```bash
-TEST_DATABASE_URL="postgresql+psycopg2://user:pass@localhost/academic_test" \
+TEST_DATABASE_URL="" \
   uv run pytest -v
 ```
 
