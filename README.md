@@ -73,7 +73,7 @@ report card, and delete cascades.
 - Swagger UI → https://academic-report-backend.onrender.com/docs
 - ReDoc → https://academic-report-backend.onrender.com/redoc
 - Raw OpenAPI → https://academic-report-backend.onrender.com/openapi.json
-- Postman Collection -> https://koustaviitjee-9433383.postman.co/workspace/Marks-Registration~e3f94e6f-948b-4f18-b9ee-5517dace6d95/request/49164018-1e541e8b-0540-4c6a-81dd-22cfe31e3bc4?action=share&creator=49164018&active-environment=49164018-f1c1e38c-e7a9-46dc-ae93-de4d4a7af0d4
+- Postman Collection -> https://koustaviitjee-9433383.postman.co/workspace/Marks-Registration~e3f94e6f-948b-4f18-b9ee-5517dace6d95/request/49164018-64a1ca96-e11e-41f8-afe3-3410b6887796?action=share&creator=49164018&active-environment=49164018-f1c1e38c-e7a9-46dc-ae93-de4d4a7af0d4
 
 A Postman collection is produced by importing `openapi.json` directly.
 
